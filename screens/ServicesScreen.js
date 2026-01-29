@@ -358,16 +358,8 @@ export default function ServicesScreen({ navigation }) {
         
         {/* Service Features */}
         <View style={styles.serviceFeatures}>
-          <View style={styles.featureItem}>
-            <Ionicons name="time-outline" size={16} color="#64748B" />
-            <Text style={styles.featureText}>
-              {item.duration || 'Flexible Schedule'}
-            </Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Ionicons name="star-outline" size={16} color="#64748B" />
-            <Text style={styles.featureText}>Expert Service</Text>
-          </View>
+          
+         
           {item.popular && (
             <LinearGradient
               colors={['#4ab8eb', '#2e4dc8']}
@@ -493,56 +485,7 @@ export default function ServicesScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
         style={styles.contentContainer}
       >
-        {/* Professional Categories with Gradient */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Service Categories</Text>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            style={styles.categoriesScroll}
-          >
-            {categories.map((cat) => (
-              <TouchableOpacity
-                key={cat}
-                onPress={() => setSelectedCategory(cat)}
-                activeOpacity={0.8}
-              >
-                {selectedCategory === cat ? (
-                  <LinearGradient
-                    colors={['#4ab8eb', '#2e4dc8']}
-                    style={styles.selectedCategoryButton}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <View style={styles.selectedCategoryIcon}>
-                      <Ionicons 
-                        name={getCategoryIcon(cat)} 
-                        size={20} 
-                        color="#fff" 
-                      />
-                    </View>
-                    <Text style={styles.selectedCategoryText}>
-                      {cat}
-                    </Text>
-                  </LinearGradient>
-                ) : (
-                  <View style={styles.categoryButton}>
-                    <View style={styles.categoryIcon}>
-                      <Ionicons 
-                        name={getCategoryIcon(cat)} 
-                        size={20} 
-                        color="#2e4dc8" 
-                      />
-                    </View>
-                    <Text style={styles.categoryText}>
-                      {cat}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+        
 
         {/* Professional Services List */}
         <View style={styles.section}>
@@ -614,7 +557,7 @@ export default function ServicesScreen({ navigation }) {
         >
           <Ionicons name="shield-checkmark-outline" size={20} color="#2e4dc8" />
           <Text style={styles.footerNoteText}>
-            All services performed by certified professionals with insurance coverage
+              Professional services with quality guarantee and certified expertise
           </Text>
         </LinearGradient>
       </ScrollView>
@@ -1097,7 +1040,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderRadius: 16,
     marginHorizontal: 24,
-    marginBottom: 32,
+    marginBottom: 82,
     borderWidth: 1,
     borderColor: '#E0F2FE',
   },

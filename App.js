@@ -137,6 +137,9 @@ function App() {
             title: route?.params?.product?.name ?? 'Product Details',
           })}
         />
+
+         
+
         {/* Add these if you want standalone stack screens */}
         <Stack.Screen
           name="CategoriesStack"

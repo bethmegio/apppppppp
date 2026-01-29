@@ -66,7 +66,7 @@ export default function ProductDetails({ navigation, route }) {
   try {
     setIsLoadingReviews(true);
     
-    // Try to fetch from reviews table
+    // Fetch reviews from database
     const { data: reviewsData, error: reviewsError } = await supabase
       .from("reviews")
       .select("*")
@@ -75,44 +75,30 @@ export default function ProductDetails({ navigation, route }) {
 
     if (reviewsError) {
       console.error("Error loading reviews:", reviewsError);
-      
-      // If table doesn't exist or has error, use sample reviews
       await createSampleReviews();
       return;
     }
 
-    // Transform the data and get user info separately
+    // Transform the data
     if (reviewsData && reviewsData.length > 0) {
-      // Get user emails for all reviews
-      const userIds = [...new Set(reviewsData.map(review => review.user_id))];
-      
-      // Fetch user emails
-      const { data: usersData } = await supabase
-        .from("auth.users")
-        .select("id, email")
-        .in("id", userIds);
-      
-      // Create a map of user_id to email
-      const userMap = {};
-      if (usersData) {
-        usersData.forEach(user => {
-          userMap[user.id] = user.email;
-        });
-      }
-      
+      // Get user emails for all reviews (optional, for user_name)
       const transformedReviews = reviewsData.map(review => {
-        const userEmail = userMap[review.user_id] || "Anonymous";
-        const userName = userEmail.split('@')[0]; // Use email prefix as name
+        // Use stored user_name if available, otherwise generate from email
+        const userName = review.user_name || 
+                        (review.user_email ? review.user_email.split('@')[0] : "Anonymous");
         
         return {
           id: review.id,
+          product_id: review.product_id,
+          user_id: review.user_id,
           rating: review.rating,
           comment: review.comment,
           user_name: userName,
-          user_email: userEmail,
           created_at: review.created_at,
+          updated_at: review.updated_at,
           helpful_count: review.helpful_count || 0,
-          is_verified_purchase: review.is_verified_purchase || false
+          is_verified_purchase: review.is_verified_purchase || false,
+          is_local: false  // From database, not local
         };
       });
       
@@ -129,7 +115,6 @@ export default function ProductDetails({ navigation, route }) {
     setIsLoadingReviews(false);
   }
 };
-
   // Create sample reviews function (fallback)
   const createSampleReviews = async () => {
     // These are realistic customer reviews for pool products
@@ -169,7 +154,10 @@ export default function ProductDetails({ navigation, route }) {
     setReviews(sampleReviews);
   };
 
-  const submitReview = async () => {
+ const submitReview = async () => {
+  console.log("📝 Submitting review for product:", product.id);
+  console.log("👤 User:", user?.id);
+
   if (!user) {
     Alert.alert("Login Required", "Please login to leave a review");
     return;
@@ -183,149 +171,321 @@ export default function ProductDetails({ navigation, route }) {
   try {
     setLoading(true);
     
-    // Get user profile for name
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", user.id)
-      .single();
-
-    const userName = profileData?.full_name || 
-                    user.user_metadata?.full_name || 
+    const userName = user.user_metadata?.full_name || 
                     user.email?.split("@")[0] || 
                     "Anonymous";
 
-    // CHECK IF USER ALREADY REVIEWED THIS PRODUCT
-    const { data: existingReview, error: checkError } = await supabase
+    // Check if user already reviewed this product
+    const { data: existingReview } = await supabase
       .from("reviews")
       .select("*")
       .eq("product_id", product.id)
       .eq("user_id", user.id)
       .maybeSingle();
 
-    if (checkError) {
-      console.error("Error checking existing review:", checkError);
-    }
-
-    let reviewData;
-    
     if (existingReview) {
-      // UPDATE EXISTING REVIEW (UPSERT)
-      Alert.alert(
-        "Update Review",
-        "You've already reviewed this product. Update your existing review?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { 
-            text: "Update", 
-            onPress: async () => {
-              const { data, error } = await supabase
-                .from("reviews")
-                .update({
-                  rating: newReview.rating,
-                  comment: newReview.comment.trim(),
-                  updated_at: new Date().toISOString()
-                })
-                .eq("id", existingReview.id)
-                .select()
-                .single();
+      // Update existing review
+      const { data: updatedReview, error: updateError } = await supabase
+        .from("reviews")
+        .update({
+          rating: newReview.rating,
+          comment: newReview.comment.trim(),
+          user_name: userName,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", existingReview.id)
+        .select()
+        .single();
 
-              if (error) {
-                console.error("Error updating review:", error);
-                handleLocalReview(userName);
-              } else {
-                handleSuccess(data, userName, true);
-              }
-            }
-          }
-        ]
-      );
-      setLoading(false);
-      return;
-    }
-
-    // INSERT NEW REVIEW
-    const { data, error } = await supabase
-      .from("reviews")
-      .insert({
-        product_id: product.id,
-        user_id: user.id,
-        rating: newReview.rating,
-        comment: newReview.comment.trim(),
-        is_verified_purchase: true
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Review insert error:", error);
-      
-      // Check if it's a duplicate key error (code 23505)
-      if (error.code === '23505') {
-        // Another review was just created - show user-friendly message
-        Alert.alert(
-          "Duplicate Review",
-          "It seems you've already submitted a review for this product. Please wait a moment and try again.",
-          [
-            { 
-              text: "Check Reviews", 
-              onPress: () => {
-                loadReviews(); // Refresh reviews
-              }
-            },
-            { text: "OK", style: "default" }
-          ]
-        );
-        setLoading(false);
-        return;
+      if (updateError) {
+        console.error("Update error:", updateError);
+        saveReviewLocally(userName, true);
+      } else {
+        const reviewObj = {
+          ...updatedReview,
+          user_name: userName
+        };
+        // Update in the reviews list
+        setReviews(reviews.map(r => 
+          r.id === existingReview.id ? reviewObj : r
+        ));
+        Alert.alert("Success", "Review updated!");
+        resetForm();
       }
-      
-      // For other errors, fallback to local storage
-      handleLocalReview(userName);
     } else {
-      // Successfully saved to database
-      handleSuccess(data, userName, false);
+      // Insert new review
+      const { data: newReviewData, error: insertError } = await supabase
+        .from("reviews")
+        .insert({
+          product_id: product.id,
+          user_id: user.id,
+          rating: newReview.rating,
+          comment: newReview.comment.trim(),
+          user_name: userName,
+          helpful_count: 0,
+          is_verified_purchase: false
+          // id, created_at, updated_at are auto-generated
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("Insert error:", insertError);
+        
+        // If it's a unique constraint violation, user already reviewed
+        if (insertError.code === '23505') {
+          Alert.alert("Already Reviewed", "You have already reviewed this product. Updating your review...");
+          // Try to find and update
+          const { data: existing } = await supabase
+            .from("reviews")
+            .select("*")
+            .eq("product_id", product.id)
+            .eq("user_id", user.id)
+            .single();
+          
+          if (existing) {
+            await supabase
+              .from("reviews")
+              .update({
+                rating: newReview.rating,
+                comment: newReview.comment.trim(),
+                user_name: userName
+              })
+              .eq("id", existing.id);
+          }
+          // Reload reviews
+          loadReviews();
+          Alert.alert("Success", "Review updated!");
+        } else {
+          saveReviewLocally(userName, false);
+        }
+      } else {
+        // Success!
+        const reviewObj = {
+          ...newReviewData,
+          user_name: userName,
+          helpful_count: 0,
+          is_verified_purchase: false
+        };
+        setReviews([reviewObj, ...reviews]);
+        Alert.alert("Success", "Thank you for your review!");
+        resetForm();
+      }
     }
     
   } catch (error) {
-    console.error("Error submitting review:", error);
+    console.error("Unexpected error:", error);
     Alert.alert("Error", "Failed to submit review. Please try again.");
   } finally {
     setLoading(false);
   }
 };
+// ============ HELPER FUNCTIONS ============
 
-// Helper function for successful review submission
-const handleSuccess = (data, userName, isUpdate = false) => {
-  const newReviewWithUser = {
-    ...data,
+// Create RPC function to bypass constraints
+// Create RPC function to bypass constraints
+const createReviewRPCFunction = async () => {
+  try {
+    // Simplified - just check if function exists and call it
+    const { data, error } = await supabase.rpc('safe_insert_review', {
+      p_product_id: product.id,
+      p_user_id: user.id,
+      p_rating: newReview.rating,
+      p_comment: newReview.comment.trim()
+    });
+
+    // If function doesn't exist, create it
+    if (error && error.message.includes('function')) {
+      // Create the function properly
+      await supabase.rpc('execute_sql', {
+        query: `
+          CREATE OR REPLACE FUNCTION safe_insert_review(
+            p_product_id integer,
+            p_user_id uuid,
+            p_rating integer,
+            p_comment text
+          )
+          RETURNS json AS $$
+          DECLARE
+            existing_id bigint;
+            result json;
+          BEGIN
+            -- Check for existing review
+            SELECT id INTO existing_id
+            FROM reviews
+            WHERE product_id = p_product_id 
+              AND user_id = p_user_id;
+            
+            IF existing_id IS NOT NULL THEN
+              -- Update existing
+              UPDATE reviews
+              SET rating = p_rating,
+                  comment = p_comment,
+                  updated_at = NOW()
+              WHERE id = existing_id
+              RETURNING row_to_json(reviews.*) INTO result;
+            ELSE
+              -- Insert new
+              INSERT INTO reviews (product_id, user_id, rating, comment)
+              VALUES (p_product_id, p_user_id, p_rating, p_comment)
+              RETURNING row_to_json(reviews.*) INTO result;
+            END IF;
+            
+            RETURN result;
+          END;
+          $$ LANGUAGE plpgsql;
+        `
+      });
+      
+      // Now try again
+      const { data: retryData, error: retryError } = await supabase.rpc('safe_insert_review', {
+        p_product_id: product.id,
+        p_user_id: user.id,
+        p_rating: newReview.rating,
+        p_comment: newReview.comment.trim()
+      });
+      
+      return { data: retryData, error: retryError };
+    }
+    
+    return { data, error };
+  } catch (e) {
+    console.log("RPC function handling failed:", e);
+    return { data: null, error: e };
+  }
+};
+
+// Update existing review
+const updateExistingReview = async (userName) => {
+  try {
+    // Find existing review
+    const { data: existing } = await supabase
+      .from("reviews")
+      .select("id, rating, comment, helpful_count")
+      .eq("product_id", product.id)
+      .eq("user_id", user.id)
+      .single();
+      
+    if (existing) {
+      // Update it
+      const { data: updated } = await supabase
+        .from("reviews")
+        .update({
+          rating: newReview.rating,
+          comment: newReview.comment.trim(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id)
+        .select()
+        .single();
+        
+      if (updated) {
+        const updatedReview = {
+          ...updated,
+          user_name: userName,
+          helpful_count: existing.helpful_count || 0,
+          is_verified_purchase: true
+        };
+        
+        updateReviews(updatedReview, true);
+        Alert.alert("Success", "Review updated!");
+        resetForm();
+      } else {
+        saveReviewLocally(userName, true);
+      }
+    }
+  } catch (updateError) {
+    console.error("Update failed:", updateError);
+    saveReviewLocally(userName, true);
+  }
+};
+
+// Save review locally
+const saveReviewLocally = async (userName, isUpdate = false) => {
+  const localReview = {
+    id: `local_${Date.now()}`,
+    product_id: product.id,
+    user_id: user.id,
+    rating: newReview.rating,
+    comment: newReview.comment.trim(),
     user_name: userName,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     helpful_count: 0,
-    is_verified_purchase: true
+    is_verified_purchase: false,
+    is_local: true
   };
   
-  // Remove old review if updating
+  // Save to AsyncStorage for persistence
+  try {
+    const localReviews = JSON.parse(await AsyncStorage.getItem('local_reviews') || '[]');
+    
+    // Remove any previous local review from same user for same product
+    const filtered = localReviews.filter(r => 
+      !(r.product_id === product.id && r.user_id === user.id && r.is_local)
+    );
+    
+    await AsyncStorage.setItem('local_reviews', JSON.stringify([localReview, ...filtered]));
+  } catch (storageError) {
+    console.error("Error saving locally:", storageError);
+  }
+  
+  // Update UI
   if (isUpdate) {
-    setReviews(reviews.map(review => 
-      review.id === data.id ? newReviewWithUser : review
-    ));
+    const filteredReviews = reviews.filter(r => 
+      !r.is_local || !(r.product_id === product.id && r.user_id === user.id)
+    );
+    setReviews([localReview, ...filteredReviews]);
   } else {
-    // Add new review
-    setReviews([newReviewWithUser, ...reviews]);
+    setReviews([localReview, ...reviews]);
   }
   
   Alert.alert(
-    "Success", 
-    isUpdate ? "Your review has been updated!" : "Thank you for your review!"
+    "Saved Locally", 
+    "Your review has been saved. We'll sync it with the server when possible.",
+    [
+      { text: "OK", style: "default" },
+      { 
+        text: "Try Again", 
+        onPress: () => {
+          // Auto-retry after 2 seconds
+          setTimeout(() => submitReview(), 2000);
+        }
+      }
+    ]
   );
-  
-  setNewReview({ rating: 5, comment: "" });
-  setShowReviewForm(false);
-  
-  // Refresh reviews to get any other updates
-  loadReviews();
+  resetForm();
+};
+// Create review object
+const createReviewObject = (data, userName) => ({
+  ...data,
+  user_name: userName,
+  helpful_count: data.helpful_count || 0,
+  is_verified_purchase: data.is_verified_purchase || true
+});
+
+// Update reviews state
+const updateReviews = (review, isUpdate) => {
+  if (isUpdate) {
+    // Update existing review
+    setReviews(prev => prev.map(r => 
+      (r.product_id === review.product_id && r.user_id === review.user_id) ? review : r
+    ));
+  } else {
+    // Add new review
+    setReviews(prev => [review, ...prev]);
+  }
 };
 
+// Reset form and reload
+const resetForm = () => {
+  setNewReview({ rating: 5, comment: "" });
+  setShowReviewForm(false);
+  // Optionally reload reviews after a delay
+  setTimeout(() => {
+    loadReviews();
+  }, 1000);
+};
 // Fallback function for local storage
 // Fallback function for local storage
 const handleLocalReview = (userName) => {
@@ -351,34 +511,74 @@ const handleLocalReview = (userName) => {
   setNewReview({ rating: 5, comment: "" });
   setShowReviewForm(false);
 };
-  const markHelpful = async (reviewId) => {
-    try {
-      // Update helpful count in database
-      const review = reviews.find(r => r.id === reviewId);
-      if (!review) return;
+ const markHelpful = async (reviewId) => {
+  try {
+    const review = reviews.find(r => r.id === reviewId);
+    if (!review) return;
 
-      const newHelpfulCount = (review.helpful_count || 0) + 1;
-      
-      // Update in state
-      setReviews(reviews.map(r => 
-        r.id === reviewId 
-          ? { ...r, helpful_count: newHelpfulCount, user_has_helpful: true }
-          : r
-      ));
+    const newHelpfulCount = (review.helpful_count || 0) + 1;
+    
+    setReviews(reviews.map(r => 
+      r.id === reviewId 
+        ? { ...r, helpful_count: newHelpfulCount, user_has_helpful: true }
+        : r
+    ));
 
-      // Update in database if table exists
-      const { error } = await supabase
-        .from("reviews")
-        .update({ helpful_count: newHelpfulCount })
-        .eq("id", reviewId);
+    // Update in database
+    const { error } = await supabase
+      .from("reviews")
+      .update({ helpful_count: newHelpfulCount })
+      .eq("id", reviewId);  // This works with UUID too
 
-      if (error && error.code !== '42P01') {
-        console.error("Error updating helpful count:", error);
-      }
-    } catch (error) {
-      console.error("Error marking helpful:", error);
+    if (error) {
+      console.error("Error updating helpful count:", error);
     }
-  };
+  } catch (error) {
+    console.error("Error marking helpful:", error);
+  }
+};
+
+
+// Call this on app startup or when network is available
+const syncLocalReviews = async () => {
+  try {
+    const localReviews = JSON.parse(await AsyncStorage.getItem('local_reviews') || '[]');
+    
+    for (const localReview of localReviews) {
+      if (localReview.is_local) {
+        try {
+          const { error } = await supabase
+            .from("reviews")
+            .upsert({
+              product_id: localReview.product_id,
+              user_id: localReview.user_id,
+              rating: localReview.rating,
+              comment: localReview.comment,
+              user_name: localReview.user_name
+            }, {
+              onConflict: 'product_id,user_id'
+            });
+          
+          if (!error) {
+            // Remove from local storage after successful sync
+            const updatedLocal = localReviews.filter(r => r.id !== localReview.id);
+            await AsyncStorage.setItem('local_reviews', JSON.stringify(updatedLocal));
+          }
+        } catch (e) {
+          console.error("Failed to sync review:", localReview.id, e);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Error syncing local reviews:", error);
+  }
+};
+
+
+
+
+
+
 
   const getReviewStats = () => {
     if (reviews.length === 0) return { average: 0, distribution: {} };

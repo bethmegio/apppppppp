@@ -3,9 +3,8 @@ const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 
 module.exports = defineConfig([
-  
+  expoConfig,
   {
     ignores: ['dist/*'],
-    base: process.env.VITE_BASE_PATH || "/apppppppp",  expoConfig,
   },
 ]);

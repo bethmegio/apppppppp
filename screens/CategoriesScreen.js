@@ -334,9 +334,7 @@ export default function CategoriesScreen({ navigation, route }) {
               }
             </Text>
           </View>
-          <View style={styles.headerLogo}>
-            <Ionicons name="grid-outline" size={32} color="#fff" />
-          </View>
+         
         </View>
       </LinearGradient>
 

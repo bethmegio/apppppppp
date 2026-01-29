@@ -251,10 +251,8 @@ export default function CartScreen({ navigation }) {
     );
   };
 
-  const continueShopping = () => {
-   navigation.navigate('CategoriesTab', {
-  screen: 'Categories',
-});
+const continueShopping = () => {
+  navigation.navigate('Categories');
 
   };
 

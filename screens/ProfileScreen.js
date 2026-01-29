@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { supabase } from '../supabaseClient';
 
+
 export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
